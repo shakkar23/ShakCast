@@ -18,33 +18,13 @@ enum class TileType {
     DoubleLetter,
     TripleLetter,
     DoubleWord,
+    Ice,
     Normal
 };
 
 constexpr static size_t char_to_index(char c) {
     return c - 'a';
 }
-
-constexpr int N = 26;
-class TrieNode {
-   public:
-    uint32_t bitfield = 0;
-    bool isEndOfWord = false;
-    std::array<std::unique_ptr<TrieNode>, N> children{};
-
-    static void TrieInsert(TrieNode* x, std::string_view key) {
-        for (char c : key) {
-            size_t index = char_to_index(c);
-            if (!(x->bitfield & (1 << index))) {
-                x->bitfield |= (1 << index);
-                x->children[index] = std::make_unique<TrieNode>();
-            }
-
-            x = x->children[index].get();
-        }
-        x->isEndOfWord = true;
-    }
-};
 
 using Board = std::array<std::array<std::pair<char, TileType>, 5>, 5>;
 
@@ -130,6 +110,47 @@ constexpr static inline int letter_type_to_mul(TileType tile_type) {
     return 1;
 }
 
+constexpr static int get_max_score(const std::string_view key, bool has_double_word, TileType tile_type) {
+    int upper_bound = 0;
+    int max_letter_score = 0;
+
+    for (char c : key) {
+        upper_bound += char_to_points(c);
+        max_letter_score = std::max(max_letter_score, char_to_points(c));
+    }
+
+    upper_bound += max_letter_score * (letter_type_to_mul(tile_type) - 1);
+    upper_bound *= (has_double_word ? 2 : 1);
+    upper_bound += (key.size() >= 6 ? 10 : 0);
+
+    return upper_bound;
+}
+
+constexpr int N = 26;
+class TrieNode {
+   public:
+    uint32_t bitfield = 0;
+    uint8_t max_score = 0;
+    bool isEndOfWord = false;
+    std::array<std::unique_ptr<TrieNode>, N> children{};
+
+    static void TrieInsert(TrieNode* x, const std::string_view key, const uint8_t max_score) {
+        for (const char c : key) {
+            x->max_score = std::max(x->max_score, max_score);
+
+            size_t index = char_to_index(c);
+            if (!(x->bitfield & (1 << index))) {
+                x->bitfield |= (1 << index);
+                x->children[index] = std::make_unique<TrieNode>();
+            }
+
+            x = x->children[index].get();
+        }
+        x->isEndOfWord = true;
+        x->max_score = std::max(x->max_score, max_score);
+    }
+};
+
 // old way of scoring
 constexpr static int score(const Board& board, const Path& path) {
     int score = 0;
@@ -147,6 +168,8 @@ constexpr static int score(const Board& board, const Path& path) {
                 break;
             case TileType::DoubleWord:
                 word_multiplier = 2;
+                break;
+            case TileType::Ice:
                 break;
             case TileType::Normal:
                 break;
@@ -190,10 +213,14 @@ static void print_path(Path& path, bool isEndOfWord) {
     if (isEndOfWord)
         std::cout << "END OF WORD";
     std::cout << std::endl;
-}*/
+}
+*/
 
 // optimized implementation, hard to read, will refactor later
-static void recurse(Board& board, Path& path, const BitBoard bboard, const int word_points, const bool has_word_mul, const int word_len, int& max_score, TrieNode* node, const int swaps, std::vector<Path>& largest_word) {
+static void recurse(Board& board, Path& path, const BitBoard bboard, const int current_word_points, const bool has_word_mul, const int word_len, int& max_score, TrieNode* node, const int swaps, std::vector<Path>& largest_word) {
+    if (node->max_score <= max_score)
+        return;
+
     // print_path(path, node->isEndOfWord);
     const auto [x, y, c] = path.back();
 
@@ -209,7 +236,7 @@ static void recurse(Board& board, Path& path, const BitBoard bboard, const int w
                     continue;
 
                 BitBoard bb_copy = bboard;
-                int next_letter_points = word_points + char_to_points(i + 'a') * letter_type_to_mul(board[x1][y1].second);
+                int next_letter_points = current_word_points + char_to_points(i + 'a') * letter_type_to_mul(board[x1][y1].second);
                 bool next_has_word_mul = has_word_mul || board[x1][y1].second == TileType::DoubleWord;
 
                 next_node = node->children.at(i).get();
@@ -223,7 +250,7 @@ static void recurse(Board& board, Path& path, const BitBoard bboard, const int w
 
         if (node->bitfield & (1 << reserved_index)) {
             BitBoard bb_copy = bboard;
-            int next_letter_points = word_points + char_to_points(reserved_index + 'a') * letter_type_to_mul(board[x1][y1].second);
+            int next_letter_points = current_word_points + char_to_points(reserved_index + 'a') * letter_type_to_mul(board[x1][y1].second);
             bool next_has_word_mul = has_word_mul || board[x1][y1].second == TileType::DoubleWord;
 
             set(bb_copy, x1, y1);
@@ -236,7 +263,7 @@ static void recurse(Board& board, Path& path, const BitBoard bboard, const int w
     }
 
     if (node->isEndOfWord) {
-        const int our_score = word_points * (has_word_mul ? 2 : 1) + (word_len >= 6 ? 10 : 0);
+        const int our_score = current_word_points * (has_word_mul ? 2 : 1) + (word_len >= 6 ? 10 : 0);
 
         if (our_score > max_score) {
             largest_word.clear();
@@ -311,6 +338,9 @@ Board parse_board() {
                     case 'w':
                         tile_type = TileType::DoubleWord;
                         break;
+                    case 'i':
+                        tile_type = TileType::Ice;
+                        break;
                     default:
                         std::unreachable();
                         break;
@@ -321,6 +351,16 @@ Board parse_board() {
     }
 
     return board;
+}
+
+BitBoard board_to_bitboard(const Board& board) {
+    BitBoard bboard = 0;
+
+    for (int i = 0; i < 5; ++i)
+        for (int j = 0; j < 5; j++)
+            if (board[i][j].second == TileType::Ice)
+                set(bboard, i, j);
+    return bboard;
 }
 
 void print_board(const Board& board) {
@@ -343,31 +383,31 @@ void print_biggest_word(const Board& board) {
                     auto [x, y, c] = path;
                     return x == i && y == j;
                 });
-                char c = board[i][j].first;
+                const char c = board[i][j].first;
 
                 if (it != words.end()) {
                     {
                         char it_c = std::get<2>(*it);
                         bool first = it == words.begin();
-                        if (it_c != board[i][j].first)
+                        if (it_c != c)
                         // make the brackets red
                         {
-                            std::cout << std::format("\033[1;31m[\033[0m", c);
+                            std::cout << std::format("\033[1;31m[\033[0m");
 
                             if (first)
                                 // color this green
-                                std::cout << std::format("\033[1;32m{}\033[0m", c);
+                                std::cout << std::format("\033[1;32m{}\033[0m", it_c);
                             else
-                                std::cout << std::format("\033[1;31m{}\033[0m", c);
+                                std::cout << std::format("\033[1;31m{}\033[0m", it_c);
 
-                            std::cout << std::format("\033[1;31m]\033[0m", c);
+                            std::cout << std::format("\033[1;31m]\033[0m");
                         } else
                             // make the text white
                             if (first)
                                 // color this green
-                                std::cout << std::format("\033[1;32m[{}]\033[0m", c);
+                                std::cout << std::format("\033[1;32m[{}]\033[0m", it_c);
                             else
-                                std::cout << std::format("\033[1;37m[{}]\033[0m", c);
+                                std::cout << std::format("\033[1;37m[{}]\033[0m", it_c);
                     }
                 } else
                     std::cout << std::format(" {} ", c);
@@ -389,16 +429,40 @@ void print_biggest_word(const Board& board) {
     }
 }
 
+std::pair<bool, TileType> get_thingy(const Board& board) {
+    TileType max_letter_mod = TileType::Normal;
+    bool has_word_mod = false;
+    for (auto& row : board)
+        for (auto& [letter, tile_type] : row)
+            if (tile_type == TileType::DoubleLetter)
+                max_letter_mod = max_letter_mod == TileType::Normal ? TileType::DoubleLetter : max_letter_mod;
+            else if (tile_type == TileType::TripleLetter)
+                max_letter_mod = TileType::TripleLetter;
+            else if (tile_type == TileType::DoubleWord)
+                has_word_mod = true;
+
+    return {has_word_mod, max_letter_mod};
+}
+
 int main(int argc, char* argv[]) {
     std::unique_ptr<TrieNode> root = std::make_unique<TrieNode>();
     Board board = parse_board();
+    auto [has_word_mod, max_letter_mod] = get_thingy(board);
 
     std::ifstream file("wordlist.txt");
     std::ifstream file2("swaps.txt");
 
     std::string word;
-    while (file >> word)
-        TrieNode::TrieInsert(root.get(), word);
+    while (file >> word) {
+        int max_score = get_max_score(word, has_word_mod, max_letter_mod);
+        // get max score based on word or something
+        [[unlikely]] if (max_score > 255) {
+            throw std::runtime_error("max score is too big");
+            std::unreachable();
+        }
+
+        TrieNode::TrieInsert(root.get(), word, max_score);
+    }
 
     const int swaps = std::stoi(std::string{std::istreambuf_iterator<char>(file2), std::istreambuf_iterator<char>()});
 
@@ -409,8 +473,9 @@ int main(int argc, char* argv[]) {
             if (swaps > 0)
                 for (int a = 'a'; a <= 'z'; ++a) {
                     Path path = {{i, j, a}};
-                    BitBoard bboard = 0;
+                    BitBoard bboard = board_to_bitboard(board);
                     set(bboard, i, j);
+
                     path.reserve(25);
                     int swaps_left = swaps;
                     if (a != board[i][j].first)
@@ -423,7 +488,7 @@ int main(int argc, char* argv[]) {
                 }
             else {
                 Path path = {{i, j, board[i][j].first}};
-                BitBoard bboard = 0;
+                BitBoard bboard = board_to_bitboard(board);
                 set(bboard, i, j);
                 recurse_swapless(board, path, bboard, root.get()->children.at(char_to_index(board[i][j].first)).get());
             }
@@ -433,6 +498,5 @@ int main(int argc, char* argv[]) {
     std::cout << std::format("elapsed time: {}s", elapsed.count() * 1e-6) << std::endl;
 
     print_biggest_word(board);
-    std::cout << biggest_words.size() << std::endl;
     return 0;
 }
