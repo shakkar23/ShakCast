@@ -11,6 +11,7 @@
 #include <memory>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -26,7 +27,7 @@ constexpr static size_t char_to_index(char c) {
     return c - 'a';
 }
 
-using Board = std::array<std::array<std::pair<char, TileType>, 5>, 5>;
+using Board = std::array<std::array<std::tuple<char, TileType, bool>, 5>, 5>;
 
 using BitBoard = uint32_t;
 
@@ -157,7 +158,7 @@ constexpr static int score(const Board& board, const Path& path) {
     int word_multiplier = 1;
 
     for (auto& [x, y, c] : path) {
-        auto& [letter, tile_type] = board[x][y];
+        auto& [letter, tile_type, has_gem] = board[x][y];
         int letter_multiplier = 1;
         switch (tile_type) {
             case TileType::DoubleLetter:
@@ -216,54 +217,80 @@ static void print_path(Path& path, bool isEndOfWord) {
 }
 */
 
+struct RecurseParams {
+    BitBoard bboard;
+    int current_word_points;
+    int current_eco_points;
+    int word_len;
+    int swaps;
+    bool has_word_mul;
+    bool eco_mode;
+
+    void update(const int x, const int y, const char c, const TileType tile_type, bool has_gem) {
+        current_eco_points += has_gem;
+        current_word_points += char_to_points(c) * letter_type_to_mul(tile_type);
+        has_word_mul |= tile_type == TileType::DoubleWord;
+        word_len++;
+        set(bboard, x, y);
+        swaps--;
+    }
+};
+
 // optimized implementation, hard to read, will refactor later
-static void recurse(Board& board, Path& path, const BitBoard bboard, const int current_word_points, const bool has_word_mul, const int word_len, int& max_score, TrieNode* node, const int swaps, std::vector<Path>& largest_word) {
+static void recurse(const Board& board, Path& path, const RecurseParams params, int& max_eco_score, int& max_score, const TrieNode* node, std::vector<Path>& largest_word) {
     if (node->max_score <= max_score)
         return;
 
     // print_path(path, node->isEndOfWord);
     const auto [x, y, c] = path.back();
 
-    const auto [neighbors, n_neighbors] = get_neighbors(path, bboard, x, y);
+    const auto [neighbors, n_neighbors] = get_neighbors(path, params.bboard, x, y);
 
     for (const auto& [x1, y1] : neighbors | std::views::take(n_neighbors)) {
-        const size_t reserved_index = char_to_index(board[x1][y1].first);
+        const size_t reserved_index = char_to_index(std::get<0>(board[x1][y1]));
         TrieNode* next_node{};
 
-        if (swaps > 0) {
+        if (params.swaps > 0) {
             for (size_t i = 0; i < N; ++i) {
                 if (!(node->bitfield & (1 << i)) || i == reserved_index)
                     continue;
 
-                BitBoard bb_copy = bboard;
-                int next_letter_points = current_word_points + char_to_points(i + 'a') * letter_type_to_mul(board[x1][y1].second);
-                bool next_has_word_mul = has_word_mul || board[x1][y1].second == TileType::DoubleWord;
-
+                RecurseParams params_copy = params;
+                params_copy.update(x1, y1, i + 'a', std::get<1>(board[x1][y1]), std::get<2>(board[x1][y1]));
                 next_node = node->children.at(i).get();
-                set(bb_copy, x1, y1);
 
                 path.emplace_back(x1, y1, i + 'a');
-                recurse(board, path, bb_copy, next_letter_points, next_has_word_mul, word_len + 1, max_score, next_node, swaps - 1, largest_word);
+                recurse(board, path, params_copy, max_eco_score, max_score, next_node, largest_word);
                 path.pop_back();
             }
         }
 
         if (node->bitfield & (1 << reserved_index)) {
-            BitBoard bb_copy = bboard;
-            int next_letter_points = current_word_points + char_to_points(reserved_index + 'a') * letter_type_to_mul(board[x1][y1].second);
-            bool next_has_word_mul = has_word_mul || board[x1][y1].second == TileType::DoubleWord;
-
-            set(bb_copy, x1, y1);
+            RecurseParams params_copy = params;
+            params_copy.update(x1, y1, std::get<0>(board[x1][y1]), std::get<1>(board[x1][y1]), std::get<2>(board[x1][y1]));
+            params_copy.swaps++;
             next_node = node->children.at(reserved_index).get();
 
-            path.emplace_back(x1, y1, board[x1][y1].first);
-            recurse(board, path, bb_copy, next_letter_points, next_has_word_mul, word_len + 1, max_score, next_node, swaps, largest_word);
+            path.emplace_back(x1, y1, std::get<0>(board[x1][y1]));
+            recurse(board, path, params_copy, max_eco_score, max_score, next_node, largest_word);
             path.pop_back();
         }
     }
 
     if (node->isEndOfWord) {
-        const int our_score = current_word_points * (has_word_mul ? 2 : 1) + (word_len >= 6 ? 10 : 0);
+        const int eco_score = params.current_eco_points;
+        const int our_score = params.current_word_points * (params.has_word_mul ? 2 : 1) + (params.word_len >= 6 ? 10 : 0);
+        if (params.eco_mode) {
+            if (eco_score > max_eco_score) {
+                largest_word.clear();
+                largest_word.emplace_back(path);
+                max_score = our_score;
+                max_eco_score = eco_score;
+                return;
+            } else if (eco_score < max_eco_score) {
+                return;
+            }
+        }
 
         if (our_score > max_score) {
             largest_word.clear();
@@ -287,10 +314,10 @@ static void recurse_swapless(const Board& board, Path& path, BitBoard bboard, Tr
     for (auto& next_cell : neighbors | std::views::take(n_neighbors)) {
         auto [x1, y1] = next_cell;
 
-        size_t index = char_to_index(board[x1][y1].first);
+        size_t index = char_to_index(std::get<0>(board[x1][y1]));
 
         if (node->bitfield & (1 << index)) {
-            path.emplace_back(x1, y1, board[x1][y1].first);
+            path.emplace_back(x1, y1, std::get<0>(board[x1][y1]));
             BitBoard bb_copy = bboard;
             set(bboard, x1, y1);
             recurse_swapless(board, path, bboard, node->children.at(index).get());
@@ -312,7 +339,7 @@ static void recurse_swapless(const Board& board, Path& path, BitBoard bboard, Tr
     }
 }
 
-Board parse_board() {
+Board parse_board_from_file() {
     std::ifstream board_file("board.txt");
 
     Board board{};
@@ -327,8 +354,9 @@ Board parse_board() {
 
         for (auto [letter, e] : v) {
             TileType tile_type = TileType::Normal;
-            if (letter.size() > 1)
-                switch (letter[1]) {
+            bool has_gem = false;
+            for (int i = 1; i < letter.size(); ++i)
+                switch (letter[i]) {
                     case 'l':
                         tile_type = TileType::DoubleLetter;
                         break;
@@ -341,13 +369,60 @@ Board parse_board() {
                     case 'i':
                         tile_type = TileType::Ice;
                         break;
+                    case 'g':
+                        has_gem = true;
                     default:
                         std::unreachable();
                         break;
                 }
-            board[i][e] = {letter[0], tile_type};
+            board[i][e] = {letter[0], tile_type, has_gem};
         }
         i++;
+    }
+
+    return board;
+}
+
+constexpr static Board parse_board_from_string(const std::string& s_board) {
+    Board board{};
+    auto lines = std::views::split(s_board, '\n');
+    auto v = std::views::zip(lines, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
+                 auto [line, i] = pair;
+                 return std::pair{line, i};
+             });
+
+    for (auto [line, i] : v) {
+        auto letters = std::views::split(line, ' ');
+        auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
+                     auto [letter, i] = pair;
+                     return std::pair{letter, i};
+                 });
+
+        for (auto [letter, e] : v) {
+            TileType tile_type = TileType::Normal;
+            bool has_gem = false;
+            for (int i = 1; i < letter.size(); ++i)
+                switch (letter[i]) {
+                    case 'l':
+                        tile_type = TileType::DoubleLetter;
+                        break;
+                    case 't':
+                        tile_type = TileType::TripleLetter;
+                        break;
+                    case 'w':
+                        tile_type = TileType::DoubleWord;
+                        break;
+                    case 'i':
+                        tile_type = TileType::Ice;
+                        break;
+                    case 'g':
+                        has_gem = true;
+                    default:
+                        std::unreachable();
+                        break;
+                }
+            board[i][e] = {letter[0], tile_type, has_gem};
+        }
     }
 
     return board;
@@ -358,7 +433,7 @@ BitBoard board_to_bitboard(const Board& board) {
 
     for (int i = 0; i < 5; ++i)
         for (int j = 0; j < 5; j++)
-            if (board[i][j].second == TileType::Ice)
+            if (std::get<1>(board[i][j]) == TileType::Ice)
                 set(bboard, i, j);
     return bboard;
 }
@@ -366,7 +441,7 @@ BitBoard board_to_bitboard(const Board& board) {
 void print_board(const Board& board) {
     std::cout << "board: " << std::endl;
     for (auto& row : board) {
-        for (auto [letter, tile_type] : row) {
+        for (auto [letter, tile_type, has_gem] : row) {
             std::cout << letter << " ";
         }
         std::cout << std::endl;
@@ -383,7 +458,7 @@ void print_biggest_word(const Board& board) {
                     auto [x, y, c] = path;
                     return x == i && y == j;
                 });
-                const char c = board[i][j].first;
+                const char c = std::get<0>(board[i][j]);
 
                 if (it != words.end()) {
                     {
@@ -429,11 +504,11 @@ void print_biggest_word(const Board& board) {
     }
 }
 
-std::pair<bool, TileType> get_thingy(const Board& board) {
+std::pair<bool, TileType> get_mods(const Board& board) {
     TileType max_letter_mod = TileType::Normal;
     bool has_word_mod = false;
     for (auto& row : board)
-        for (auto& [letter, tile_type] : row)
+        for (auto& [letter, tile_type, has_gem] : row)
             if (tile_type == TileType::DoubleLetter)
                 max_letter_mod = max_letter_mod == TileType::Normal ? TileType::DoubleLetter : max_letter_mod;
             else if (tile_type == TileType::TripleLetter)
@@ -446,11 +521,12 @@ std::pair<bool, TileType> get_thingy(const Board& board) {
 
 int main(int argc, char* argv[]) {
     std::unique_ptr<TrieNode> root = std::make_unique<TrieNode>();
-    Board board = parse_board();
-    auto [has_word_mod, max_letter_mod] = get_thingy(board);
+    Board board = parse_board_from_file();
+    auto [has_word_mod, max_letter_mod] = get_mods(board);
 
     std::ifstream file("wordlist.txt");
     std::ifstream file2("swaps.txt");
+    std::ifstream file3("eco.txt");
 
     std::string word;
     while (file >> word) {
@@ -465,32 +541,33 @@ int main(int argc, char* argv[]) {
     }
 
     const int swaps = std::stoi(std::string{std::istreambuf_iterator<char>(file2), std::istreambuf_iterator<char>()});
+    bool eco_mode = std::stoi(std::string{std::istreambuf_iterator<char>(file3), std::istreambuf_iterator<char>()});
 
     auto start = std::chrono::high_resolution_clock::now();
+    int max_eco_score = 0;
     int max_score = 0;
     for (int i = 0; i < 5; ++i)
         for (int j = 0; j < 5; ++j)
             if (swaps > 0)
                 for (int a = 'a'; a <= 'z'; ++a) {
                     Path path = {{i, j, a}};
-                    BitBoard bboard = board_to_bitboard(board);
-                    set(bboard, i, j);
+                    RecurseParams params{};
+                    params.update(i, j, a, std::get<1>(board[i][j]), std::get<2>(board[i][j]));
+
+                    int swaps_left = swaps;
+                    if (a != std::get<0>(board[i][j]))
+                        swaps_left--;
+                    params.swaps = swaps_left;
+                    params.eco_mode = eco_mode;
 
                     path.reserve(25);
-                    int swaps_left = swaps;
-                    if (a != board[i][j].first)
-                        swaps_left--;
-
-                    int next_letter_points = char_to_points(a) * letter_type_to_mul(board[i][j].second);
-                    bool next_has_word_mul = board[i][j].second == TileType::DoubleWord;
-
-                    recurse(board, path, bboard, next_letter_points, next_has_word_mul, 1, max_score, root.get()->children.at(char_to_index(a)).get(), swaps_left, biggest_words);
+                    recurse(board, path, params, max_eco_score, max_score, root.get()->children.at(char_to_index(a)).get(), biggest_words);
                 }
             else {
-                Path path = {{i, j, board[i][j].first}};
+                Path path = {{i, j, std::get<0>(board[i][j])}};
                 BitBoard bboard = board_to_bitboard(board);
                 set(bboard, i, j);
-                recurse_swapless(board, path, bboard, root.get()->children.at(char_to_index(board[i][j].first)).get());
+                recurse_swapless(board, path, bboard, root.get()->children.at(char_to_index(std::get<0>(board[i][j]))).get());
             }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -498,5 +575,7 @@ int main(int argc, char* argv[]) {
     std::cout << std::format("elapsed time: {}s", elapsed.count() * 1e-6) << std::endl;
 
     print_biggest_word(board);
+    std::cout << "max score: " << max_score << std::endl;
+    std::cout << "max eco score: " << max_eco_score << std::endl;
     return 0;
 }
