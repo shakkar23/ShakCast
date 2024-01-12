@@ -383,51 +383,6 @@ Board parse_board_from_file() {
     return board;
 }
 
-constexpr static Board parse_board_from_string(const std::string& s_board) {
-    Board board{};
-    auto lines = std::views::split(s_board, '\n');
-    auto v = std::views::zip(lines, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
-                 auto [line, i] = pair;
-                 return std::pair{line, i};
-             });
-
-    for (auto [line, i] : v) {
-        auto letters = std::views::split(line, ' ');
-        auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
-                     auto [letter, i] = pair;
-                     return std::pair{letter, i};
-                 });
-
-        for (auto [letter, e] : v) {
-            TileType tile_type = TileType::Normal;
-            bool has_gem = false;
-            for (int i = 1; i < letter.size(); ++i)
-                switch (letter[i]) {
-                    case 'l':
-                        tile_type = TileType::DoubleLetter;
-                        break;
-                    case 't':
-                        tile_type = TileType::TripleLetter;
-                        break;
-                    case 'w':
-                        tile_type = TileType::DoubleWord;
-                        break;
-                    case 'i':
-                        tile_type = TileType::Ice;
-                        break;
-                    case 'g':
-                        has_gem = true;
-                    default:
-                        std::unreachable();
-                        break;
-                }
-            board[i][e] = {letter[0], tile_type, has_gem};
-        }
-    }
-
-    return board;
-}
-
 BitBoard board_to_bitboard(const Board& board) {
     BitBoard bboard = 0;
 
