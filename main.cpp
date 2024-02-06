@@ -31,21 +31,21 @@ using Board = std::array<std::array<std::tuple<char, TileType, bool>, 5>, 5>;
 
 using BitBoard = uint32_t;
 
-constexpr inline static bool get(const BitBoard board, int x, int y) {
+constexpr static bool get(const BitBoard board, int x, int y) {
     return board & (1 << (x * 5 + y));
 }
 
-constexpr inline static void set(BitBoard& board, int x, int y) {
+constexpr static void set(BitBoard& board, int x, int y) {
     board |= (1 << (x * 5 + y));
 }
 
-constexpr inline static void unset(BitBoard& board, int x, int y) {
+constexpr static void unset(BitBoard& board, int x, int y) {
     board &= ~(1 << (x * 5 + y));
 }
 
 using Path = std::vector<std::tuple<int, int, char>>;
 
-constexpr static inline int char_to_points(char c) {
+constexpr static int char_to_points(char c) {
     int value{};
     switch (c) {
         case 'a':
@@ -97,7 +97,7 @@ constexpr static inline int char_to_points(char c) {
     return value;
 }
 
-constexpr static inline int letter_type_to_mul(TileType tile_type) {
+constexpr static int letter_type_to_mul(TileType tile_type) {
     switch (tile_type) {
         case TileType::DoubleLetter:
             return 2;
@@ -311,7 +311,7 @@ static void recurse(const Board& board, Path& path, const RecurseParams params, 
 
 // default word, should be overridden by recurse, also should be refactored out
 
-Board parse_board_from_file() {
+static Board parse_board_from_file() {
     std::ifstream board_file("board.txt");
 
     Board board{};
@@ -324,7 +324,7 @@ Board parse_board_from_file() {
         for (auto [letter, e] : v) {
             TileType tile_type = TileType::Normal;
             bool has_gem = false;
-            for (int c = 1; c < letter.size(); ++c) {
+            for (size_t c = 1; c < letter.size(); ++c) {
                 switch (letter[c]) {
                     case 'l':
                         tile_type = TileType::DoubleLetter;
@@ -353,73 +353,7 @@ Board parse_board_from_file() {
     return board;
 }
 
-constexpr static Board parse_board_from_string(const std::string& s_board) {
-    Board board{};
-    auto lines = std::views::split(s_board, '\n');
-    auto v = std::views::zip(lines, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
-                 auto [line, i] = pair;
-                 return std::pair{line, i};
-             });
-
-    for (auto [line, i] : v) {
-        auto letters = std::views::split(line, ' ');
-        auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
-                     auto [letter, i] = pair;
-                     return std::pair{letter, i};
-                 });
-
-        for (auto [letter, e] : v) {
-            TileType tile_type = TileType::Normal;
-            bool has_gem = false;
-            for (int i = 1; i < letter.size(); ++i)
-                switch (letter[i]) {
-                    case 'l':
-                        tile_type = TileType::DoubleLetter;
-                        break;
-                    case 't':
-                        tile_type = TileType::TripleLetter;
-                        break;
-                    case 'w':
-                        tile_type = TileType::DoubleWord;
-                        break;
-                    case 'i':
-                        tile_type = TileType::Ice;
-                        break;
-                    case 'g':
-                        has_gem = true;
-                    default:
-                        std::unreachable();
-                        break;
-                }
-            board[i][e] = {letter[0], tile_type, has_gem};
-        }
-    }
-
-    return board;
-}
-
-BitBoard board_to_bitboard(const Board& board) {
-    BitBoard bboard = 0;
-
-    for (int i = 0; i < 5; ++i)
-        for (int j = 0; j < 5; j++)
-            if (std::get<1>(board[i][j]) == TileType::Ice)
-                set(bboard, i, j);
-    return bboard;
-}
-
-void print_board(const Board& board) {
-    std::cout << "board: " << std::endl;
-    for (auto& row : board) {
-        for (auto [letter, tile_type, has_gem] : row) {
-            std::cout << letter << " ";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
-}
-
-void print_biggest_word(const Board& board, std::vector<Path>& biggest_words) {
+static void print_biggest_word(const Board& board, std::vector<Path>& biggest_words) {
     for (auto& words : std::views::reverse(biggest_words) | std::views::take(10)) {
         std::cout << "board: " << std::endl;
         for (int i = 0; i < 5; ++i) {
@@ -474,7 +408,7 @@ void print_biggest_word(const Board& board, std::vector<Path>& biggest_words) {
     }
 }
 
-std::pair<bool, TileType> get_mods(const Board& board) {
+static std::pair<bool, TileType> get_mods(const Board& board) {
     TileType max_letter_mod = TileType::Normal;
     bool has_word_mod = false;
     for (auto& row : board)
