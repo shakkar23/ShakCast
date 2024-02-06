@@ -310,41 +310,6 @@ static void recurse(const Board& board, Path& path, const RecurseParams params, 
 }
 
 // default word, should be overridden by recurse, also should be refactored out
-std::vector<Path> biggest_words = {{{{0, 0, 'e'}}}};
-
-static void recurse_swapless(const Board& board, Path& path, BitBoard bboard, TrieNode* node) {
-    // print_path(path, node->isEndOfWord);
-    auto [x, y, c] = path.back();
-
-    const auto [neighbors, n_neighbors] = get_neighbors(path, bboard, x, y);
-
-    for (auto& next_cell : neighbors | std::views::take(n_neighbors)) {
-        auto [x1, y1] = next_cell;
-
-        size_t index = char_to_index(std::get<0>(board[x1][y1]));
-
-        if (node->bitfield & (1 << index)) {
-            path.emplace_back(x1, y1, std::get<0>(board[x1][y1]));
-            BitBoard bb_copy = bboard;
-            set(bboard, x1, y1);
-            recurse_swapless(board, path, bboard, node->children.at(index).get());
-            bboard = bb_copy;
-            path.pop_back();
-        }
-    }
-    // see if we are at the end of a word
-    if (node->isEndOfWord) {
-        int max_score = score(board, biggest_words[0]);
-        int our_score = score(board, path);
-
-        if (our_score > max_score) {
-            biggest_words.clear();
-            biggest_words.emplace_back(path);
-        } else if (our_score == max_score) {
-            biggest_words.emplace_back(path);
-        }
-    }
-}
 
 Board parse_board_from_file() {
     std::ifstream board_file("board.txt");
@@ -454,7 +419,7 @@ void print_board(const Board& board) {
     std::cout << std::endl;
 }
 
-void print_biggest_word(const Board& board) {
+void print_biggest_word(const Board& board, std::vector<Path>& biggest_words) {
     for (auto& words : std::views::reverse(biggest_words) | std::views::take(10)) {
         std::cout << "board: " << std::endl;
         for (int i = 0; i < 5; ++i) {
@@ -547,10 +512,11 @@ int main(int argc, char* argv[]) {
 
     const int swaps = std::stoi(std::string{std::istreambuf_iterator<char>(file2), std::istreambuf_iterator<char>()});
     bool eco_mode = std::stoi(std::string{std::istreambuf_iterator<char>(file3), std::istreambuf_iterator<char>()});
-
-    auto start = std::chrono::high_resolution_clock::now();
+    std::vector<Path> biggest_words = {{{{0, 0, 'e'}}}};
     int max_eco_score = 0;
     int max_score = 0;
+
+    auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 5; ++i)
         for (int j = 0; j < 5; ++j)
             if (swaps > 0)
@@ -583,7 +549,7 @@ int main(int argc, char* argv[]) {
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << std::format("elapsed time: {}s", elapsed.count() * 1e-6) << std::endl;
 
-    print_biggest_word(board);
+    print_biggest_word(board, biggest_words);
     std::cout << "max score: " << max_score << std::endl;
     std::cout << "max eco score: " << max_eco_score << std::endl;
     return 0;
