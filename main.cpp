@@ -227,7 +227,7 @@ struct RecurseParams {
     bool eco_mode;
 
     void update(const int x, const int y, const char c, const TileType tile_type, bool has_gem) {
-        current_eco_points += has_gem;
+        current_eco_points += has_gem ? 1 : 0;
         current_word_points += char_to_points(c) * letter_type_to_mul(tile_type);
         has_word_mul |= tile_type == TileType::DoubleWord;
         word_len++;
@@ -286,16 +286,23 @@ static void recurse(const Board& board, Path& path, const RecurseParams params, 
                 largest_word.emplace_back(path);
                 max_score = our_score;
                 max_eco_score = eco_score;
-                return;
-            } else if (eco_score < max_eco_score) {
-                return;
+            } else if (eco_score == max_eco_score) {
+                if (our_score > max_score) {
+                    largest_word.clear();
+                    largest_word.emplace_back(path);
+                    max_score = our_score;
+                    max_eco_score = eco_score;
+                } else if (our_score == max_score) {
+                    largest_word.emplace_back(path);
+                }
             }
         }
 
-        if (our_score > max_score) {
+        else if (our_score > max_score) {
             largest_word.clear();
             largest_word.emplace_back(path);
             max_score = our_score;
+            max_eco_score = eco_score;
         } else if (our_score == max_score) {
             largest_word.emplace_back(path);
         }
@@ -347,6 +354,50 @@ Board parse_board_from_file() {
     std::string line;
     while (std::getline(board_file, line)) {
         auto letters = std::views::split(line, ' ');
+        auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5);
+
+        for (auto [letter, e] : v) {
+            TileType tile_type = TileType::Normal;
+            bool has_gem = false;
+            for (int c = 1; c < letter.size(); ++c) {
+                switch (letter[c]) {
+                    case 'l':
+                        tile_type = TileType::DoubleLetter;
+                        break;
+                    case 't':
+                        tile_type = TileType::TripleLetter;
+                        break;
+                    case 'w':
+                        tile_type = TileType::DoubleWord;
+                        break;
+                    case 'i':
+                        tile_type = TileType::Ice;
+                        break;
+                    case 'g':
+                        has_gem = true;
+                        break;
+                    default:
+                        std::unreachable();
+                }
+            }
+            board[i][e] = {letter[0], tile_type, has_gem};
+        }
+        i++;
+    }
+
+    return board;
+}
+
+constexpr static Board parse_board_from_string(const std::string& s_board) {
+    Board board{};
+    auto lines = std::views::split(s_board, '\n');
+    auto v = std::views::zip(lines, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
+                 auto [line, i] = pair;
+                 return std::pair{line, i};
+             });
+
+    for (auto [line, i] : v) {
+        auto letters = std::views::split(line, ' ');
         auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5) | std::views::transform([](auto pair) {
                      auto [letter, i] = pair;
                      return std::pair{letter, i};
@@ -377,7 +428,6 @@ Board parse_board_from_file() {
                 }
             board[i][e] = {letter[0], tile_type, has_gem};
         }
-        i++;
     }
 
     return board;
@@ -520,9 +570,13 @@ int main(int argc, char* argv[]) {
                 }
             else {
                 Path path = {{i, j, std::get<0>(board[i][j])}};
-                BitBoard bboard = board_to_bitboard(board);
-                set(bboard, i, j);
-                recurse_swapless(board, path, bboard, root.get()->children.at(char_to_index(std::get<0>(board[i][j]))).get());
+                RecurseParams params{};
+                params.update(i, j, std::get<0>(board[i][j]), std::get<1>(board[i][j]), std::get<2>(board[i][j]));
+                params.swaps = 0;
+                params.eco_mode = eco_mode;
+
+                path.reserve(25);
+                recurse(board, path, params, max_eco_score, max_score, root.get()->children.at(char_to_index(std::get<0>(board[i][j]))).get(), biggest_words);
             }
 
     auto end = std::chrono::high_resolution_clock::now();
