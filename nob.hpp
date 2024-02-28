@@ -30,16 +30,17 @@
 #define NOB_FREE free
 
 #include <assert.h>
+#include <ctype.h>
+#include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <ctype.h>
-#include <vector>
+
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -47,15 +48,15 @@
 #define _WINGDI_
 #define _IMM_
 #define _WINCON_
-#include <windows.h>
 #include <direct.h>
 #include <shellapi.h>
+#include <windows.h>
 #else
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 #endif
 
 #ifdef _WIN32
@@ -68,8 +69,7 @@
 #define NOB_ARRAY_GET(array, index) \
     (NOB_ASSERT(index >= 0), NOB_ASSERT(index < NOB_ARRAY_LEN(array)), array[index])
 
-typedef enum
-{
+typedef enum {
     NOB_INFO,
     NOB_WARNING,
     NOB_ERROR,
@@ -81,8 +81,7 @@ void nob_log(Nob_Log_Level level, const char *fmt, ...);
 // argument from the beginning.
 char *nob_shift_args(int *argc, char ***argv);
 
-typedef enum
-{
+typedef enum {
     NOB_FILE_REGULAR = 0,
     NOB_FILE_DIRECTORY,
     NOB_FILE_SYMLINK,
@@ -97,8 +96,7 @@ bool nob_write_entire_file(const char *path, void *data, size_t size);
 Nob_File_Type nob_get_file_type(const char *path);
 
 #define nob_return_defer(value) \
-    do                          \
-    {                           \
+    do {                        \
         result = (value);       \
         goto defer;             \
     } while (0)
@@ -115,7 +113,7 @@ typedef HANDLE Nob_Proc;
 #else
 typedef int Nob_Proc;
 #define NOB_INVALID_PROC (-1)
-#endif // _WIN32
+#endif  // _WIN32
 
 typedef std::vector<Nob_Proc> Nob_Procs;
 
@@ -143,7 +141,7 @@ void nob_cmd_append_many(Nob_Cmd &cmd, ...);
 
 #ifndef NOB_TEMP_CAPACITY
 #define NOB_TEMP_CAPACITY (8 * 1024 * 1024)
-#endif // NOB_TEMP_CAPACITY
+#endif  // NOB_TEMP_CAPACITY
 char *nob_temp_strdup(const char *cstr);
 void *nob_temp_alloc(size_t size);
 char *nob_temp_sprintf(const char *format, ...);
@@ -153,7 +151,7 @@ void nob_temp_rewind(size_t checkpoint);
 
 int is_path1_modified_after_path2(const char *path1, const char *path2);
 bool nob_rename(const char *old_path, const char *new_path);
-int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t input_paths_count);
+int nob_needs_rebuild(std::string output_path, std::vector<std::string> input_paths);
 int nob_needs_rebuild1(const char *output_path, const char *input_path);
 int nob_file_exists(const char *file_path);
 
@@ -207,28 +205,25 @@ int nob_file_exists(const char *file_path);
 //   as simple as possible and doing all of the actual work inside of the nobuild)
 //
 #define NOB_GO_REBUILD_URSELF(argc, argv)                                        \
-    do                                                                           \
-    {                                                                            \
-        const char *source_path = __FILE__;                                      \
+    do {                                                                         \
+        std::vector<std::string> source_path = {__FILE__};                       \
         assert(argc >= 1);                                                       \
         const char *binary_path = argv[0];                                       \
                                                                                  \
-        int rebuild_is_needed = nob_needs_rebuild(binary_path, &source_path, 1); \
+        int rebuild_is_needed = nob_needs_rebuild(binary_path, source_path);     \
         if (rebuild_is_needed < 0)                                               \
             exit(1);                                                             \
-        if (rebuild_is_needed)                                                   \
-        {                                                                        \
+        if (rebuild_is_needed) {                                                 \
             std::string sb;                                                      \
             sb.append(binary_path);                                              \
             sb.append(".old");                                                   \
             if (!nob_rename(binary_path, sb.c_str()))                            \
                 exit(1);                                                         \
                                                                                  \
-            Nob_Cmd rebuild = {NOB_REBUILD_URSELF(binary_path, source_path)};    \
+            Nob_Cmd rebuild = {NOB_REBUILD_URSELF(binary_path, source_path[0])}; \
             bool rebuild_succeeded = nob_cmd_run_sync(rebuild);                  \
             rebuild.clear();                                                     \
-            if (!rebuild_succeeded)                                              \
-            {                                                                    \
+            if (!rebuild_succeeded) {                                            \
                 nob_rename(sb.c_str(), binary_path);                             \
                 exit(1);                                                         \
             }                                                                    \
@@ -240,7 +235,7 @@ int nob_file_exists(const char *file_path);
                 exit(1);                                                         \
             exit(0);                                                             \
         }                                                                        \
-    } while (0) // The implementation idea is stolen from https://github.com/zhiayang/nabs
+    } while (0)  // The implementation idea is stolen from https://github.com/zhiayang/nabs
 
 typedef struct
 {
@@ -259,10 +254,10 @@ Nob_String_View nob_sv_from_parts(const char *data, size_t count);
 // printf macros for String_View
 #ifndef SV_Fmt
 #define SV_Fmt "%.*s"
-#endif // SV_Fmt
+#endif  // SV_Fmt
 #ifndef SV_Arg
 #define SV_Arg(sv) (int)(sv).count, (sv).data
-#endif // SV_Arg
+#endif  // SV_Arg
 // USAGE:
 //   String_View name = ...;
 //   printf("Name: "SV_Fmt"\n", SV_Arg(name));
@@ -305,13 +300,12 @@ Nob_String_View nob_sv_from_parts(const char *data, size_t count);
 
 #ifndef _WIN32
 #include <dirent.h>
-#else // _WIN32
+#else  // _WIN32
 
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 
-struct dirent
-{
+struct dirent {
     char d_name[MAX_PATH + 1];
 };
 
@@ -320,10 +314,10 @@ typedef struct DIR DIR;
 DIR *opendir(const char *dirpath);
 struct dirent *readdir(DIR *dirp);
 int closedir(DIR *dirp);
-#endif // _WIN32
+#endif  // _WIN32
 // minirent.h HEADER END ////////////////////////////////////////
 
-#endif // NOB_H_
+#endif  // NOB_H_
 
 #define NOB_IMPLEMENTATION
 #ifdef NOB_IMPLEMENTATION
@@ -331,17 +325,14 @@ int closedir(DIR *dirp);
 static size_t nob_temp_size = 0;
 static char nob_temp[NOB_TEMP_CAPACITY] = {0};
 
-bool nob_mkdir_if_not_exists(const char *path)
-{
+bool nob_mkdir_if_not_exists(const char *path) {
 #ifdef _WIN32
     int result = mkdir(path);
 #else
     int result = mkdir(path, 0755);
 #endif
-    if (result < 0)
-    {
-        if (errno == EEXIST)
-        {
+    if (result < 0) {
+        if (errno == EEXIST) {
             nob_log(NOB_INFO, "directory `%s` already exists", path);
             return true;
         }
@@ -353,12 +344,10 @@ bool nob_mkdir_if_not_exists(const char *path)
     return true;
 }
 
-bool nob_copy_file(const std::string src_path, const std::string dst_path)
-{
+bool nob_copy_file(const std::string src_path, const std::string dst_path) {
     nob_log(NOB_INFO, "copying %s -> %s", src_path, dst_path);
 #ifdef _WIN32
-    if (!CopyFile((LPCWSTR)src_path.c_str(), (LPCWSTR)dst_path.c_str(), FALSE))
-    {
+    if (!CopyFileW((LPCWSTR)src_path.c_str(), (LPCWSTR)dst_path.c_str(), FALSE)) {
         nob_log(NOB_ERROR, "Could not copy file: %lu", GetLastError());
         return false;
     }
@@ -372,42 +361,35 @@ bool nob_copy_file(const std::string src_path, const std::string dst_path)
     bool result = true;
 
     src_fd = open(src_path.c_str(), O_RDONLY);
-    if (src_fd < 0)
-    {
+    if (src_fd < 0) {
         nob_log(NOB_ERROR, "Could not open file %s: %s", src_path, strerror(errno));
         nob_return_defer(false);
     }
 
     struct stat src_stat;
-    if (fstat(src_fd, &src_stat) < 0)
-    {
+    if (fstat(src_fd, &src_stat) < 0) {
         nob_log(NOB_ERROR, "Could not get mode of file %s: %s", src_path, strerror(errno));
         nob_return_defer(false);
     }
 
     dst_fd = open(dst_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, src_stat.st_mode);
-    if (dst_fd < 0)
-    {
+    if (dst_fd < 0) {
         nob_log(NOB_ERROR, "Could not create file %s: %s", dst_path, strerror(errno));
         nob_return_defer(false);
     }
 
-    for (;;)
-    {
+    for (;;) {
         ssize_t n = read(src_fd, buf.data(), buf_size);
         if (n == 0)
             break;
-        if (n < 0)
-        {
+        if (n < 0) {
             nob_log(NOB_ERROR, "Could not read from file %s: %s", src_path, strerror(errno));
             nob_return_defer(false);
         }
         char *buf2 = buf.data();
-        while (n > 0)
-        {
+        while (n > 0) {
             ssize_t m = write(dst_fd, buf2, n);
-            if (m < 0)
-            {
+            if (m < 0) {
                 nob_log(NOB_ERROR, "Could not write to file %s: %s", dst_path, strerror(errno));
                 nob_return_defer(false);
             }
@@ -423,21 +405,16 @@ defer:
 #endif
 }
 
-void nob_cmd_render(Nob_Cmd cmd, std::string &render)
-{
-    for (size_t i = 0; i < cmd.size(); ++i)
-    {
+void nob_cmd_render(Nob_Cmd cmd, std::string &render) {
+    for (size_t i = 0; i < cmd.size(); ++i) {
         const char *arg = cmd[i].c_str();
         if (arg == NULL)
             break;
         if (i > 0)
             render.push_back(' ');
-        if (!strchr(arg, ' '))
-        {
+        if (!strchr(arg, ' ')) {
             render.append(arg);
-        }
-        else
-        {
+        } else {
             render.push_back('\'');
             render.append(arg);
             render.push_back('\'');
@@ -445,10 +422,8 @@ void nob_cmd_render(Nob_Cmd cmd, std::string &render)
     }
 }
 
-Nob_Proc nob_cmd_run_async(Nob_Cmd &cmd)
-{
-    if (cmd.size() < 1)
-    {
+Nob_Proc nob_cmd_run_async(Nob_Cmd &cmd) {
+    if (cmd.size() < 1) {
         nob_log(NOB_ERROR, "Could not run empty command");
         return NOB_INVALID_PROC;
     }
@@ -482,8 +457,7 @@ Nob_Proc nob_cmd_run_async(Nob_Cmd &cmd)
     nob_cmd_render(cmd, sb);
     BOOL bSuccess = CreateProcessA(NULL, (LPSTR)sb.c_str(), NULL, NULL, TRUE, 0, NULL, NULL, (LPSTARTUPINFOA)&siStartInfo, &piProcInfo);
 
-    if (!bSuccess)
-    {
+    if (!bSuccess) {
         nob_log(NOB_ERROR, "Could not create child process: %lu", GetLastError());
         return NOB_INVALID_PROC;
     }
@@ -493,22 +467,19 @@ Nob_Proc nob_cmd_run_async(Nob_Cmd &cmd)
     return piProcInfo.hProcess;
 #else
     pid_t cpid = fork();
-    if (cpid < 0)
-    {
+    if (cpid < 0) {
         nob_log(NOB_ERROR, "Could not fork child process: %s", strerror(errno));
         return NOB_INVALID_PROC;
     }
 
-    if (cpid == 0)
-    {
+    if (cpid == 0) {
         // NOTE: This leaks a bit of memory in the child process.
         // But do we actually care? It's a one off leak anyway...
         std::vector<const char *> cmd_null;
         for (int i = 0; i < cmd.size(); ++i)
             cmd_null.push_back(cmd[i].c_str());
         cmd_null.push_back(NULL);
-        if (execvp(cmd[0].c_str(), (char *const *)cmd_null.data()) < 0)
-        {
+        if (execvp(cmd[0].c_str(), (char *const *)cmd_null.data()) < 0) {
             nob_log(NOB_ERROR, "%s", cmd[0].c_str());
             nob_log(NOB_ERROR, "Could not exec child process: %s", strerror(errno));
             exit(1);
@@ -520,42 +491,36 @@ Nob_Proc nob_cmd_run_async(Nob_Cmd &cmd)
 #endif
 }
 
-bool nob_procs_wait(std::vector<Nob_Proc> procs)
-{
+bool nob_procs_wait(std::vector<Nob_Proc> procs) {
     bool success = true;
-    for (size_t i = 0; i < procs.size(); ++i)
-    {
+    for (size_t i = 0; i < procs.size(); ++i) {
         success = nob_proc_wait(procs[i]) && success;
     }
     return success;
 }
 
-bool nob_proc_wait(Nob_Proc proc)
-{
+bool nob_proc_wait(Nob_Proc proc) {
     if (proc == NOB_INVALID_PROC)
         return false;
 
 #ifdef _WIN32
     DWORD result = WaitForSingleObject(
-        proc,    // HANDLE hHandle,
-        INFINITE // DWORD  dwMilliseconds
+        proc,     // HANDLE hHandle,
+        INFINITE  // DWORD  dwMilliseconds
     );
 
-    if (result == WAIT_FAILED)
-    {
+    if (result == WAIT_FAILED) {
         nob_log(NOB_ERROR, "could not wait on child process: %lu", GetLastError());
         return false;
     }
 
     DWORD exit_status;
-    if (!GetExitCodeProcess(proc, &exit_status))
-    {
+    if (!GetExitCodeProcess(proc, &exit_status)) {
         nob_log(NOB_ERROR, "could not get process exit code: %lu", GetLastError());
         return false;
     }
 
-    if (exit_status != 0)
-    {
+    if (exit_status != 0) {
         nob_log(NOB_ERROR, "command exited with exit code %lu", exit_status);
         return false;
     }
@@ -564,20 +529,16 @@ bool nob_proc_wait(Nob_Proc proc)
 
     return true;
 #else
-    for (;;)
-    {
+    for (;;) {
         int wstatus = 0;
-        if (waitpid(proc, &wstatus, 0) < 0)
-        {
+        if (waitpid(proc, &wstatus, 0) < 0) {
             nob_log(NOB_ERROR, "could not wait on command (pid %d): %s", proc, strerror(errno));
             return false;
         }
 
-        if (WIFEXITED(wstatus))
-        {
+        if (WIFEXITED(wstatus)) {
             int exit_status = WEXITSTATUS(wstatus);
-            if (exit_status != 0)
-            {
+            if (exit_status != 0) {
                 nob_log(NOB_ERROR, "command exited with exit code %d", exit_status);
                 return false;
             }
@@ -585,8 +546,7 @@ bool nob_proc_wait(Nob_Proc proc)
             break;
         }
 
-        if (WIFSIGNALED(wstatus))
-        {
+        if (WIFSIGNALED(wstatus)) {
             nob_log(NOB_ERROR, "command process was terminated by %s", strsignal(WTERMSIG(wstatus)));
             return false;
         }
@@ -596,29 +556,25 @@ bool nob_proc_wait(Nob_Proc proc)
 #endif
 }
 
-bool nob_cmd_run_sync(Nob_Cmd &cmd)
-{
+bool nob_cmd_run_sync(Nob_Cmd &cmd) {
     Nob_Proc p = nob_cmd_run_async(cmd);
     if (p == NOB_INVALID_PROC)
         return false;
     return nob_proc_wait(p);
 }
 
-void nob_cmd_append_many(Nob_Cmd &cmd, ...)
-{
+void nob_cmd_append_many(Nob_Cmd &cmd, ...) {
     va_list args;
     va_start(args, cmd);
     const char *str = va_arg(args, const char *);
-    while (str != NULL)
-    {
+    while (str != NULL) {
         cmd.push_back(str);
         str = va_arg(args, const char *);
     }
     va_end(args);
 }
 
-char *nob_shift_args(int *argc, char ***argv)
-{
+char *nob_shift_args(int *argc, char ***argv) {
     NOB_ASSERT(*argc > 0);
     char *result = **argv;
     (*argv) += 1;
@@ -626,21 +582,19 @@ char *nob_shift_args(int *argc, char ***argv)
     return result;
 }
 
-void nob_log(Nob_Log_Level level, const char *fmt, ...)
-{
-    switch (level)
-    {
-    case NOB_INFO:
-        fprintf(stderr, "[INFO] ");
-        break;
-    case NOB_WARNING:
-        fprintf(stderr, "[WARNING] ");
-        break;
-    case NOB_ERROR:
-        fprintf(stderr, "[ERROR] ");
-        break;
-    default:
-        NOB_ASSERT(0 && "unreachable");
+void nob_log(Nob_Log_Level level, const char *fmt, ...) {
+    switch (level) {
+        case NOB_INFO:
+            fprintf(stderr, "[INFO] ");
+            break;
+        case NOB_WARNING:
+            fprintf(stderr, "[WARNING] ");
+            break;
+        case NOB_ERROR:
+            fprintf(stderr, "[ERROR] ");
+            break;
+        default:
+            NOB_ASSERT(0 && "unreachable");
     }
 
     va_list args;
@@ -650,29 +604,25 @@ void nob_log(Nob_Log_Level level, const char *fmt, ...)
     fprintf(stderr, "\n");
 }
 
-bool nob_read_entire_dir(const char *parent, std::vector<std::string> children)
-{
+bool nob_read_entire_dir(const char *parent, std::vector<std::string> children) {
     bool result = true;
     DIR *dir = NULL;
     struct dirent *ent;
 
     dir = opendir(parent);
-    if (dir == NULL)
-    {
+    if (dir == NULL) {
         nob_log(NOB_ERROR, "Could not open directory %s: %s", parent, strerror(errno));
         nob_return_defer(false);
     }
 
     errno = 0;
     ent = readdir(dir);
-    while (ent != NULL)
-    {
+    while (ent != NULL) {
         children.push_back(nob_temp_strdup(ent->d_name));
         ent = readdir(dir);
     }
 
-    if (errno != 0)
-    {
+    if (errno != 0) {
         nob_log(NOB_ERROR, "Could not read directory %s: %s", parent, strerror(errno));
         nob_return_defer(false);
     }
@@ -683,14 +633,12 @@ defer:
     return result;
 }
 
-bool nob_write_entire_file(const char *path, void *data, size_t size)
-{
+bool nob_write_entire_file(const char *path, void *data, size_t size) {
     bool result = true;
 
     FILE *f = fopen(path, "wb");
     char *buf;
-    if (f == NULL)
-    {
+    if (f == NULL) {
         nob_log(NOB_ERROR, "Could not open file %s for writing: %s\n", path, strerror(errno));
         nob_return_defer(false);
     }
@@ -702,11 +650,9 @@ bool nob_write_entire_file(const char *path, void *data, size_t size)
     //     data
 
     buf = (char *)data;
-    while (size > 0)
-    {
+    while (size > 0) {
         size_t n = fwrite(buf, 1, size, f);
-        if (ferror(f))
-        {
+        if (ferror(f)) {
             nob_log(NOB_ERROR, "Could not write into file %s: %s\n", path, strerror(errno));
             nob_return_defer(false);
         }
@@ -720,12 +666,10 @@ defer:
     return result;
 }
 
-Nob_File_Type nob_get_file_type(const std::string path)
-{
+Nob_File_Type nob_get_file_type(const std::string path) {
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES)
-    {
+    if (attr == INVALID_FILE_ATTRIBUTES) {
         nob_log(NOB_ERROR, "Could not get file attributes of %s: %lu", path, GetLastError());
         NOB_ASSERT(0 && "unreachable");
     }
@@ -734,30 +678,27 @@ Nob_File_Type nob_get_file_type(const std::string path)
         return NOB_FILE_DIRECTORY;
     // TODO: detect symlinks on Windows (whatever that means on Windows anyway)
     return NOB_FILE_REGULAR;
-#else  // _WIN32
+#else   // _WIN32
     struct stat statbuf;
-    if (stat(path.c_str(), &statbuf) < 0)
-    {
+    if (stat(path.c_str(), &statbuf) < 0) {
         nob_log(NOB_ERROR, "Could not get stat of %s: %s", path.c_str(), strerror(errno));
         NOB_ASSERT(0 && "unreachable");
     }
 
-    switch (statbuf.st_mode & S_IFMT)
-    {
-    case S_IFDIR:
-        return NOB_FILE_DIRECTORY;
-    case S_IFREG:
-        return NOB_FILE_REGULAR;
-    case S_IFLNK:
-        return NOB_FILE_SYMLINK;
-    default:
-        return NOB_FILE_OTHER;
+    switch (statbuf.st_mode & S_IFMT) {
+        case S_IFDIR:
+            return NOB_FILE_DIRECTORY;
+        case S_IFREG:
+            return NOB_FILE_REGULAR;
+        case S_IFLNK:
+            return NOB_FILE_SYMLINK;
+        default:
+            return NOB_FILE_OTHER;
     }
-#endif // _WIN32
+#endif  // _WIN32
 }
 
-bool nob_copy_directory_recursively(std::string src_path, std::string dst_path)
-{
+bool nob_copy_directory_recursively(std::string src_path, std::string dst_path) {
     bool result = true;
     std::vector<std::string> children;
     std::string src_sb;
@@ -768,64 +709,52 @@ bool nob_copy_directory_recursively(std::string src_path, std::string dst_path)
     if (type < 0)
         return false;
 
-    switch (type)
-    {
-    case NOB_FILE_DIRECTORY:
-    {
-        if (!nob_mkdir_if_not_exists(dst_path.c_str()))
-            nob_return_defer(false);
-        if (!nob_read_entire_dir(src_path.c_str(), children))
-            nob_return_defer(false);
+    switch (type) {
+        case NOB_FILE_DIRECTORY: {
+            if (!nob_mkdir_if_not_exists(dst_path.c_str()))
+                nob_return_defer(false);
+            if (!nob_read_entire_dir(src_path.c_str(), children))
+                nob_return_defer(false);
 
-        for (size_t i = 0; i < children.size(); ++i)
-        {
-            if (strcmp(children[i].c_str(), ".") == 0)
-                continue;
-            if (strcmp(children[i].c_str(), "..") == 0)
-                continue;
+            for (size_t i = 0; i < children.size(); ++i) {
+                if (strcmp(children[i].c_str(), ".") == 0)
+                    continue;
+                if (strcmp(children[i].c_str(), "..") == 0)
+                    continue;
 
-            src_sb.clear();
-            src_sb.append(src_path);
-            src_sb.append("/");
-            src_sb.append(children[i]);
+                src_sb.clear();
+                src_sb.append(src_path);
+                src_sb.append("/");
+                src_sb.append(children[i]);
 
-            dst_sb.clear();
-            dst_sb.append(dst_path);
-            dst_sb.append("/");
-            dst_sb.append(children[i]);
+                dst_sb.clear();
+                dst_sb.append(dst_path);
+                dst_sb.append("/");
+                dst_sb.append(children[i]);
 
-            if (!nob_copy_directory_recursively(src_sb, dst_sb))
-            {
+                if (!nob_copy_directory_recursively(src_sb, dst_sb)) {
+                    nob_return_defer(false);
+                }
+            }
+        } break;
+
+        case NOB_FILE_REGULAR: {
+            if (!nob_copy_file(src_path, dst_path)) {
                 nob_return_defer(false);
             }
-        }
-    }
-    break;
+        } break;
 
-    case NOB_FILE_REGULAR:
-    {
-        if (!nob_copy_file(src_path, dst_path))
-        {
+        case NOB_FILE_SYMLINK: {
+            nob_log(NOB_WARNING, "TODO: Copying symlinks is not supported yet");
+        } break;
+
+        case NOB_FILE_OTHER: {
+            nob_log(NOB_ERROR, "Unsupported type of file %s", src_path);
             nob_return_defer(false);
-        }
-    }
-    break;
+        } break;
 
-    case NOB_FILE_SYMLINK:
-    {
-        nob_log(NOB_WARNING, "TODO: Copying symlinks is not supported yet");
-    }
-    break;
-
-    case NOB_FILE_OTHER:
-    {
-        nob_log(NOB_ERROR, "Unsupported type of file %s", src_path);
-        nob_return_defer(false);
-    }
-    break;
-
-    default:
-        NOB_ASSERT(0 && "unreachable");
+        default:
+            NOB_ASSERT(0 && "unreachable");
     }
 
 defer:
@@ -833,8 +762,7 @@ defer:
     return result;
 }
 
-char *nob_temp_strdup(const char *cstr)
-{
+char *nob_temp_strdup(const char *cstr) {
     size_t n = strlen(cstr);
     char *result = (char *)nob_temp_alloc(n + 1);
     NOB_ASSERT(result != NULL && "Increase NOB_TEMP_CAPACITY");
@@ -843,8 +771,7 @@ char *nob_temp_strdup(const char *cstr)
     return result;
 }
 
-void *nob_temp_alloc(size_t size)
-{
+void *nob_temp_alloc(size_t size) {
     if (nob_temp_size + size > NOB_TEMP_CAPACITY)
         return NULL;
     void *result = &nob_temp[nob_temp_size];
@@ -852,8 +779,7 @@ void *nob_temp_alloc(size_t size)
     return result;
 }
 
-char *nob_temp_sprintf(const char *format, ...)
-{
+char *nob_temp_sprintf(const char *format, ...) {
     va_list args;
     va_start(args, format);
     int n = vsnprintf(NULL, 0, format, args);
@@ -870,23 +796,19 @@ char *nob_temp_sprintf(const char *format, ...)
     return result;
 }
 
-void nob_temp_reset(void)
-{
+void nob_temp_reset(void) {
     nob_temp_size = 0;
 }
 
-size_t nob_temp_save(void)
-{
+size_t nob_temp_save(void) {
     return nob_temp_size;
 }
 
-void nob_temp_rewind(size_t checkpoint)
-{
+void nob_temp_rewind(size_t checkpoint) {
     nob_temp_size = checkpoint;
 }
 
-const char *nob_temp_sv_to_cstr(Nob_String_View sv)
-{
+const char *nob_temp_sv_to_cstr(Nob_String_View sv) {
     char *result = (char *)nob_temp_alloc(sv.count + 1);
     NOB_ASSERT(result != NULL && "Extend the size of the temporary allocator");
     memcpy(result, sv.data, sv.count);
@@ -894,14 +816,13 @@ const char *nob_temp_sv_to_cstr(Nob_String_View sv)
     return result;
 }
 
-int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t input_paths_count)
-{
+int nob_needs_rebuild(std::string output_path, std::vector<std::string> input_paths) {
+    size_t input_paths_count = input_paths.size();
 #ifdef _WIN32
     BOOL bSuccess;
 
-    HANDLE output_path_fd = CreateFile((LPWSTR)output_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-    if (output_path_fd == INVALID_HANDLE_VALUE)
-    {
+    HANDLE output_path_fd = CreateFileW((LPWSTR)output_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
+    if (output_path_fd == INVALID_HANDLE_VALUE) {
         // NOTE: if output does not exist it 100% must be rebuilt
         if (GetLastError() == ERROR_FILE_NOT_FOUND)
             return 1;
@@ -911,18 +832,15 @@ int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t 
     FILETIME output_path_time;
     bSuccess = GetFileTime(output_path_fd, NULL, NULL, &output_path_time);
     CloseHandle(output_path_fd);
-    if (!bSuccess)
-    {
+    if (!bSuccess) {
         nob_log(NOB_ERROR, "Could not get time of %s: %lu", output_path, GetLastError());
         return -1;
     }
 
-    for (size_t i = 0; i < input_paths_count; ++i)
-    {
+    for (size_t i = 0; i < input_paths_count; ++i) {
         const char *input_path = input_paths[i];
-        HANDLE input_path_fd = CreateFile((LPWSTR)input_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-        if (input_path_fd == INVALID_HANDLE_VALUE)
-        {
+        HANDLE input_path_fd = CreateFileW((LPWSTR)input_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
+        if (input_path_fd == INVALID_HANDLE_VALUE) {
             // NOTE: non-existing input is an error cause it is needed for building in the first place
             nob_log(NOB_ERROR, "Could not open file %s: %lu", input_path, GetLastError());
             return -1;
@@ -930,8 +848,7 @@ int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t 
         FILETIME input_path_time;
         bSuccess = GetFileTime(input_path_fd, NULL, NULL, &input_path_time);
         CloseHandle(input_path_fd);
-        if (!bSuccess)
-        {
+        if (!bSuccess) {
             nob_log(NOB_ERROR, "Could not get time of %s: %lu", input_path, GetLastError());
             return -1;
         }
@@ -945,8 +862,7 @@ int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t 
 #else
     struct stat statbuf = {0};
 
-    if (stat(output_path, &statbuf) < 0)
-    {
+    if (stat(output_path.c_str(), &statbuf) < 0) {
         // NOTE: if output does not exist it 100% must be rebuilt
         if (errno == ENOENT)
             return 1;
@@ -955,11 +871,9 @@ int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t 
     }
     int output_path_time = statbuf.st_mtime;
 
-    for (size_t i = 0; i < input_paths_count; ++i)
-    {
-        const char *input_path = input_paths[i];
-        if (stat(input_path, &statbuf) < 0)
-        {
+    for (size_t i = 0; i < input_paths_count; ++i) {
+        const char *input_path = input_paths[i].c_str();
+        if (stat(input_path, &statbuf) < 0) {
             // NOTE: non-existing input is an error cause it is needed for building in the first place
             nob_log(NOB_ERROR, "could not stat %s: %s", input_path, strerror(errno));
             return -1;
@@ -974,51 +888,43 @@ int nob_needs_rebuild(const char *output_path, const char **input_paths, size_t 
 #endif
 }
 
-int nob_needs_rebuild1(const char *output_path, const char *input_path)
-{
-    return nob_needs_rebuild(output_path, &input_path, 1);
+int nob_needs_rebuild1(const char *output_path, const char *input_path) {
+    return nob_needs_rebuild(output_path, {input_path});
 }
 
-bool nob_rename(const char *old_path, const char *new_path)
-{
+bool nob_rename(const char *old_path, const char *new_path) {
     nob_log(NOB_INFO, "renaming %s -> %s", old_path, new_path);
 #ifdef _WIN32
-    if (!MoveFileEx((LPWSTR)old_path, (LPWSTR)new_path, MOVEFILE_REPLACE_EXISTING))
-    {
+    if (!MoveFileExW((LPWSTR)old_path, (LPWSTR)new_path, MOVEFILE_REPLACE_EXISTING)) {
         nob_log(NOB_ERROR, "could not rename %s to %s: %lu", old_path, new_path, GetLastError());
         return false;
     }
 #else
-    if (rename(old_path, new_path) < 0)
-    {
+    if (rename(old_path, new_path) < 0) {
         nob_log(NOB_ERROR, "could not rename %s to %s: %s", old_path, new_path, strerror(errno));
         return false;
     }
-#endif // _WIN32
+#endif  // _WIN32
     return true;
 }
 
-bool nob_read_entire_file(const char *path, std::string &sb)
-{
+bool nob_read_entire_file(const char *path, std::string &sb) {
     bool result = true;
     size_t buf_size = 32 * 1024;
     std::vector<uint8_t> buf(buf_size);
     FILE *f = fopen(path, "rb");
     size_t n;
-    if (f == NULL)
-    {
+    if (f == NULL) {
         nob_log(NOB_ERROR, "Could not open %s for reading: %s", path, strerror(errno));
         nob_return_defer(false);
     }
 
     n = fread(buf.data(), 1, buf_size, f);
-    while (n > 0)
-    {
+    while (n > 0) {
         sb.append((char *)buf.data(), n);
         n = fread(buf.data(), 1, buf_size, f);
     }
-    if (ferror(f))
-    {
+    if (ferror(f)) {
         nob_log(NOB_ERROR, "Could not read %s: %s\n", path, strerror(errno));
         nob_return_defer(false);
     }
@@ -1029,23 +935,18 @@ defer:
     return result;
 }
 
-Nob_String_View nob_sv_chop_by_delim(Nob_String_View *sv, char delim)
-{
+Nob_String_View nob_sv_chop_by_delim(Nob_String_View *sv, char delim) {
     size_t i = 0;
-    while (i < sv->count && sv->data[i] != delim)
-    {
+    while (i < sv->count && sv->data[i] != delim) {
         i += 1;
     }
 
     Nob_String_View result = nob_sv_from_parts(sv->data, i);
 
-    if (i < sv->count)
-    {
+    if (i < sv->count) {
         sv->count -= i + 1;
         sv->data += i + 1;
-    }
-    else
-    {
+    } else {
         sv->count -= i;
         sv->data += i;
     }
@@ -1053,54 +954,43 @@ Nob_String_View nob_sv_chop_by_delim(Nob_String_View *sv, char delim)
     return result;
 }
 
-Nob_String_View nob_sv_from_parts(const char *data, size_t count)
-{
+Nob_String_View nob_sv_from_parts(const char *data, size_t count) {
     Nob_String_View sv;
     sv.count = count;
     sv.data = data;
     return sv;
 }
 
-Nob_String_View nob_sv_trim_left(Nob_String_View sv)
-{
+Nob_String_View nob_sv_trim_left(Nob_String_View sv) {
     size_t i = 0;
-    while (i < sv.count && isspace(sv.data[i]))
-    {
+    while (i < sv.count && isspace(sv.data[i])) {
         i += 1;
     }
 
     return nob_sv_from_parts(sv.data + i, sv.count - i);
 }
 
-Nob_String_View nob_sv_trim_right(Nob_String_View sv)
-{
+Nob_String_View nob_sv_trim_right(Nob_String_View sv) {
     size_t i = 0;
-    while (i < sv.count && isspace(sv.data[sv.count - 1 - i]))
-    {
+    while (i < sv.count && isspace(sv.data[sv.count - 1 - i])) {
         i += 1;
     }
 
     return nob_sv_from_parts(sv.data, sv.count - i);
 }
 
-Nob_String_View nob_sv_trim(Nob_String_View sv)
-{
+Nob_String_View nob_sv_trim(Nob_String_View sv) {
     return nob_sv_trim_right(nob_sv_trim_left(sv));
 }
 
-Nob_String_View nob_sv_from_cstr(const char *cstr)
-{
+Nob_String_View nob_sv_from_cstr(const char *cstr) {
     return nob_sv_from_parts(cstr, strlen(cstr));
 }
 
-bool nob_sv_eq(Nob_String_View a, Nob_String_View b)
-{
-    if (a.count != b.count)
-    {
+bool nob_sv_eq(Nob_String_View a, Nob_String_View b) {
+    if (a.count != b.count) {
         return false;
-    }
-    else
-    {
+    } else {
         return memcmp(a.data, b.data, a.count) == 0;
     }
 }
@@ -1109,16 +999,14 @@ bool nob_sv_eq(Nob_String_View a, Nob_String_View b)
 //  0 - file does not exists
 //  1 - file exists
 // -1 - error while checking if file exists. The error is logged
-int nob_file_exists(const char *file_path)
-{
+int nob_file_exists(const char *file_path) {
 #if _WIN32
     // TODO: distinguish between "does not exists" and other errors
     DWORD dwAttrib = GetFileAttributesA(file_path);
     return dwAttrib != INVALID_FILE_ATTRIBUTES;
 #else
     struct stat statbuf;
-    if (stat(file_path, &statbuf) < 0)
-    {
+    if (stat(file_path, &statbuf) < 0) {
         if (errno == ENOENT)
             return 0;
         nob_log(NOB_ERROR, "Could not check if file %s exists: %s", file_path, strerror(errno));
@@ -1130,15 +1018,13 @@ int nob_file_exists(const char *file_path)
 
 // minirent.h SOURCE BEGIN ////////////////////////////////////////
 #ifdef _WIN32
-struct DIR
-{
+struct DIR {
     HANDLE hFind;
-    WIN32_FIND_DATA data;
+    LPWIN32_FIND_DATAW data;
     struct dirent *dirent;
 };
 
-DIR *opendir(const char *dirpath)
-{
+DIR *opendir(const char *dirpath) {
     assert(dirpath);
 
     char buffer[MAX_PATH];
@@ -1146,9 +1032,8 @@ DIR *opendir(const char *dirpath)
 
     DIR *dir = (DIR *)calloc(1, sizeof(DIR));
 
-    dir->hFind = FindFirstFile((LPCWSTR)buffer, &dir->data);
-    if (dir->hFind == INVALID_HANDLE_VALUE)
-    {
+    dir->hFind = FindFirstFileW((LPCWSTR)buffer, dir->data);
+    if (dir->hFind == INVALID_HANDLE_VALUE) {
         // TODO: opendir should set errno accordingly on FindFirstFile fail
         // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
         errno = ENOSYS;
@@ -1158,28 +1043,21 @@ DIR *opendir(const char *dirpath)
     return dir;
 
 fail:
-    if (dir)
-    {
+    if (dir) {
         free(dir);
     }
 
     return NULL;
 }
 
-struct dirent *readdir(DIR *dirp)
-{
+struct dirent *readdir(DIR *dirp) {
     assert(dirp);
 
-    if (dirp->dirent == NULL)
-    {
+    if (dirp->dirent == NULL) {
         dirp->dirent = (struct dirent *)calloc(1, sizeof(struct dirent));
-    }
-    else
-    {
-        if (!FindNextFile(dirp->hFind, &dirp->data))
-        {
-            if (GetLastError() != ERROR_NO_MORE_FILES)
-            {
+    } else {
+        if (!FindNextFileW(dirp->hFind, dirp->data)) {
+            if (GetLastError() != ERROR_NO_MORE_FILES) {
                 // TODO: readdir should set errno accordingly on FindNextFile fail
                 // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
                 errno = ENOSYS;
@@ -1193,33 +1071,30 @@ struct dirent *readdir(DIR *dirp)
 
     strncpy(
         dirp->dirent->d_name,
-        (const char *)dirp->data.cFileName,
+        (const char *)dirp->data->cFileName,
         sizeof(dirp->dirent->d_name) - 1);
 
     return dirp->dirent;
 }
 
-int closedir(DIR *dirp)
-{
+int closedir(DIR *dirp) {
     assert(dirp);
 
-    if (!FindClose(dirp->hFind))
-    {
+    if (!FindClose(dirp->hFind)) {
         // TODO: closedir should set errno accordingly on FindClose fail
         // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
         errno = ENOSYS;
         return -1;
     }
 
-    if (dirp->dirent)
-    {
+    if (dirp->dirent) {
         free(dirp->dirent);
     }
     free(dirp);
 
     return 0;
 }
-#endif // _WIN32
+#endif  // _WIN32
 // minirent.h SOURCE END ////////////////////////////////////////
 
 #endif
