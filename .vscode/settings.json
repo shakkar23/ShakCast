@@ -74,7 +74,12 @@
         "iomanip": "cpp",
         "optional": "cpp",
         "memory": "cpp",
-        "execution": "cpp"
+        "execution": "cpp",
+        "numeric": "cpp",
+        "fstream": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp",
+        "shared_mutex": "cpp"
     },
     "editor.defaultFormatter": "ms-vscode.cpptools",
     "editor.formatOnSave": true,

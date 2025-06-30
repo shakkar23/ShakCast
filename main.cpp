@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <memory_resource>
 #include <ranges>
 #include <string_view>
 #include <tuple>
@@ -42,6 +43,7 @@ constexpr static void set(BitBoard& board, int x, int y) {
 constexpr static void unset(BitBoard& board, int x, int y) {
     board &= ~(1 << (x * 5 + y));
 }
+std::pmr::monotonic_buffer_resource resource;
 
 using Path = std::vector<std::tuple<int, int, char>>;
 
@@ -91,7 +93,6 @@ constexpr static int char_to_points(char c) {
             value = 8;
             break;
         default:
-            std::unreachable();
             break;
     }
     return value;
@@ -133,7 +134,7 @@ class TrieNode {
     uint32_t bitfield = 0;
     uint8_t max_score = 0;
     bool isEndOfWord = false;
-    std::array<std::unique_ptr<TrieNode>, N> children{};
+    std::array<TrieNode*, N> children{};
 
     static void TrieInsert(TrieNode* x, const std::string_view key, const uint8_t max_score) {
         for (const char c : key) {
@@ -142,10 +143,10 @@ class TrieNode {
             size_t index = char_to_index(c);
             if (!(x->bitfield & (1 << index))) {
                 x->bitfield |= (1 << index);
-                x->children[index] = std::make_unique<TrieNode>();
+                x->children[index] = new (resource.allocate(sizeof(TrieNode), alignof(TrieNode)))(TrieNode);
             }
 
-            x = x->children[index].get();
+            x = x->children[index];
         }
         x->isEndOfWord = true;
         x->max_score = std::max(x->max_score, max_score);
@@ -257,7 +258,7 @@ static void recurse(const Board& board, Path& path, const RecurseParams params, 
 
                 RecurseParams params_copy = params;
                 params_copy.update(x1, y1, i + 'a', std::get<1>(board[x1][y1]), std::get<2>(board[x1][y1]));
-                next_node = node->children.at(i).get();
+                next_node = node->children.at(i);
 
                 path.emplace_back(x1, y1, i + 'a');
                 recurse(board, path, params_copy, max_eco_score, max_score, next_node, largest_word);
@@ -269,7 +270,7 @@ static void recurse(const Board& board, Path& path, const RecurseParams params, 
             RecurseParams params_copy = params;
             params_copy.update(x1, y1, std::get<0>(board[x1][y1]), std::get<1>(board[x1][y1]), std::get<2>(board[x1][y1]));
             params_copy.swaps++;
-            next_node = node->children.at(reserved_index).get();
+            next_node = node->children.at(reserved_index);
 
             path.emplace_back(x1, y1, std::get<0>(board[x1][y1]));
             recurse(board, path, params_copy, max_eco_score, max_score, next_node, largest_word);
@@ -316,8 +317,8 @@ static Board parse_board_from_file() {
 
     Board board{};
     int i = 0;
-    std::string line;
-    while (std::getline(board_file, line)) {
+
+    for (std::string line; std::getline(board_file, line);) {
         auto letters = std::views::split(line, ' ');
         auto v = std::views::zip(letters, std::views::iota(0)) | std::views::take(5);
 
@@ -325,6 +326,8 @@ static Board parse_board_from_file() {
             TileType tile_type = TileType::Normal;
             bool has_gem = false;
             for (size_t c = 1; c < letter.size(); ++c) {
+                if (!std::isalpha(letter[c]))
+                    continue;
                 switch (letter[c]) {
                     case 'l':
                         tile_type = TileType::DoubleLetter;
@@ -342,7 +345,7 @@ static Board parse_board_from_file() {
                         has_gem = true;
                         break;
                     default:
-                        std::unreachable();
+                        break;
                 }
             }
             board[i][e] = {letter[0], tile_type, has_gem};
@@ -424,28 +427,38 @@ static std::pair<bool, TileType> get_mods(const Board& board) {
 }
 
 int main(int argc, char* argv[]) {
-    std::unique_ptr<TrieNode> root = std::make_unique<TrieNode>();
+    std::cout << "STARTED PROGRAM" << std::endl;
+    TrieNode* root =
+        new (resource.allocate(sizeof(TrieNode), alignof(TrieNode)))(TrieNode);
+
     Board board = parse_board_from_file();
     auto [has_word_mod, max_letter_mod] = get_mods(board);
 
-    std::ifstream file("wordlist.txt");
-    std::ifstream file2("swaps.txt");
-    std::ifstream file3("eco.txt");
+    std::ifstream wordlist_file("wordlist.txt");
+    std::ifstream swaps_file("swaps.txt");
+    std::ifstream eco_file("eco.txt");
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::string word;
+        while (wordlist_file >> word) {
+            if (std::ranges::any_of(word, [](const auto& c) { return !std::isalpha(c); }))
+                continue;
+            int max_score = get_max_score(word, has_word_mod, max_letter_mod);
+            // get max score based on word or something
+            [[unlikely]] if (max_score > 255) {
+                throw std::runtime_error("max score is too big");
+            }
 
-    std::string word;
-    while (file >> word) {
-        int max_score = get_max_score(word, has_word_mod, max_letter_mod);
-        // get max score based on word or something
-        [[unlikely]] if (max_score > 255) {
-            throw std::runtime_error("max score is too big");
-            std::unreachable();
+            TrieNode::TrieInsert(root, word, max_score);
         }
 
-        TrieNode::TrieInsert(root.get(), word, max_score);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        std::cout << std::format("elapsed time: {}ms", elapsed.count() / 1000.) << std::endl;
     }
 
-    const int swaps = std::stoi(std::string{std::istreambuf_iterator<char>(file2), std::istreambuf_iterator<char>()});
-    bool eco_mode = std::stoi(std::string{std::istreambuf_iterator<char>(file3), std::istreambuf_iterator<char>()});
+    const int swaps = std::stoi(std::string{std::istreambuf_iterator<char>(swaps_file), std::istreambuf_iterator<char>()});
+    bool eco_mode = std::stoi(std::string{std::istreambuf_iterator<char>(eco_file), std::istreambuf_iterator<char>()});
     std::vector<Path> biggest_words = {{{{0, 0, 'e'}}}};
     int max_eco_score = 0;
     int max_score = 0;
@@ -466,7 +479,8 @@ int main(int argc, char* argv[]) {
                     params.eco_mode = eco_mode;
 
                     path.reserve(25);
-                    recurse(board, path, params, max_eco_score, max_score, root.get()->children.at(char_to_index(a)).get(), biggest_words);
+                    if (root->bitfield & 1 << (a - 'a')) [[likely]]
+                        recurse(board, path, params, max_eco_score, max_score, root->children.at(char_to_index(a)), biggest_words);
                 }
             else {
                 Path path = {{i, j, std::get<0>(board[i][j])}};
@@ -476,12 +490,13 @@ int main(int argc, char* argv[]) {
                 params.eco_mode = eco_mode;
 
                 path.reserve(25);
-                recurse(board, path, params, max_eco_score, max_score, root.get()->children.at(char_to_index(std::get<0>(board[i][j]))).get(), biggest_words);
+                if (root->bitfield & 1 << (std::get<0>(board[i][j]) - 'a')) [[likely]]
+                    recurse(board, path, params, max_eco_score, max_score, root->children.at(char_to_index(std::get<0>(board[i][j]))), biggest_words);
             }
 
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << std::format("elapsed time: {}s", elapsed.count() * 1e-6) << std::endl;
+    std::cout << std::format("elapsed time: {}ms", elapsed.count() / 1000.) << std::endl;
 
     print_biggest_word(board, biggest_words);
     std::cout << "max score: " << max_score << std::endl;
