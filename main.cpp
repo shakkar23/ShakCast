@@ -141,12 +141,13 @@ class TrieNode {
             x->max_score = std::max(x->max_score, max_score);
 
             size_t index = char_to_index(c);
-            if (!(x->bitfield & (1 << index))) {
-                x->bitfield |= (1 << index);
-                x->children[index] = new (resource.allocate(sizeof(TrieNode), alignof(TrieNode)))(TrieNode);
+            if (index < x->children.size()) [[likely]] {
+                if (!(x->bitfield & (1 << index))) {
+                    x->bitfield |= (1 << index);
+                    x->children[index] = new (resource.allocate(sizeof(TrieNode), alignof(TrieNode)))(TrieNode);
+                }
+                x = x->children[index];
             }
-
-            x = x->children[index];
         }
         x->isEndOfWord = true;
         x->max_score = std::max(x->max_score, max_score);

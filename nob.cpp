@@ -7,11 +7,13 @@
 int main(int argc, char **argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
     const char *main_cpp = "main.cpp";
-    const char *main_o = "main";
+    const char *main_o = "debug_main";
 
     const char *program = nob_shift_args(&argc, &argv);
     const char *benchmarking = argc > 0 ? nob_shift_args(&argc, &argv) : nullptr;
-
+    if (benchmarking) {
+        main_o = "main";
+    }
     Nob_Cmd cmd = {
         CXX_COMPILER, NOB_CPPSTD_STR, "-o", main_o, main_cpp
         //, "-L./", "-lraylib", "-I./include"
